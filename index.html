@@ -1,17 +1,51 @@
+```html
 <!doctype html>
 <html lang="id">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PEMIRA — Voting</title>
+
 <style>
-html,body,#app{margin:0;width:100%;height:100%;overflow:hidden;background:#111}
-#app{position:relative}
-iframe{display:block;width:100%;height:100%;border:0}
-#status{position:fixed;left:10px;bottom:10px;z-index:10;background:rgba(0,0,0,.72);color:#fff;font:12px/1.4 system-ui;padding:7px 9px;border-radius:7px;opacity:.0;pointer-events:none}
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #111;
+}
+
+#app {
+  position: relative;
+}
+
+iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+#status {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font: 12px/1.4 system-ui;
+  padding: 7px 9px;
+  border-radius: 7px;
+  opacity: 0;
+  pointer-events: none;
+}
 </style>
 </head>
+
 <body>
+
 <div id="app">
   <iframe id="figma" allowfullscreen></iframe>
   <div id="status"></div>
@@ -19,68 +53,101 @@ iframe{display:block;width:100%;height:100%;border:0}
 
 <script>
 const CONFIG = {
-  FIGMA_FILE_KEY: "ye6WV9CRpb5QpyPNjcD7o7",
-  // Ganti dengan Client ID Embed API Figma milikmu.
-  FIGMA_CLIENT_ID:"WtJAjvjMcjz1x0tX3D8kgZ",
 
-  // Starting flow yang selama ini sudah kamu pakai.
+  // File Figma
+  FIGMA_FILE_KEY: "ye6WV9CRpb5QpyPNjcD7o7",
+
+  // Starting flow
   START_NODE_ID: "61-293",
 
-  // Satu Apps Script Web App. Tidak perlu 3 Apps Script.
-  API_URL: "https://script.google.com/macros/s/AKfycbzNGL-Oh0igs4seEXKuXY1FUPSkPM6lJzoRfqZT5wL8_a8OGyQCA775kExwElQxGGO0nw/exec",
+  // Satu Apps Script Web App
+  API_URL:
+    "https://script.google.com/macros/s/AKfycbzNGL-Oh0igs4seEXKuXY1FUPSkPM6lJzoRfqZT5wL8_a8OGyQCA775kExwElQxGGO0nw/exec",
 
-  // Node ID tombol "Ya, Saya Yakin..." pada 3 halaman konfirmasi.
+  // Node ID tombol voting
   VOTE_BUTTONS: {
     "133:1031": "Paslon 1",
     "133:933": "Paslon 2",
     "133:982": "Paslon 3"
   },
 
-  // Text layer di dalam tombol, untuk jaga-jaga event Figma mengembalikan child node.
+  // Text layer di dalam tombol
+  // Untuk sementara baru Paslon 1 yang diketahui.
   VOTE_TEXT_NODES: {
     "133:1032": "Paslon 1"
-    // Tambahkan node text Paslon 2/3 setelah diketahui dari event console.
   }
 };
+
+
+// ================================
+// CEK DEV
+// ================================
 
 const params = new URLSearchParams(location.search);
 const dev = params.get("dev");
 
-if (!["1","2","3"].includes(dev)) {
+if (!["1", "2", "3"].includes(dev)) {
+
   document.body.innerHTML =
-    '<div style="font:20px system-ui;color:white;padding:30px">Link Dev tidak valid. Gunakan ?dev=1, ?dev=2, atau ?dev=3.</div>';
+    '<div style="font:20px system-ui;color:white;padding:30px">' +
+    'Link Dev tidak valid. Gunakan ?dev=1, ?dev=2, atau ?dev=3.' +
+    '</div>';
+
   throw new Error("Invalid dev");
 }
 
-if (CONFIG.FIGMA_CLIENT_ID === "PASTE_CLIENT_ID_DI_SINI") {
-  document.body.innerHTML =
-    '<div style="font:20px system-ui;color:white;padding:30px">Client ID Figma Embed API belum diisi.</div>';
-  throw new Error("Missing Figma client id");
-}
+
+// ================================
+// ELEMENT
+// ================================
 
 const iframe = document.getElementById("figma");
 const statusEl = document.getElementById("status");
+
+
+// ================================
+// URL FIGMA
+// ================================
 
 const figmaUrl =
   `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
   `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
   `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-  `&embed-host=pemira-voting` +
- 
+  `&embed-host=pemira-voting`;
 
 iframe.src = figmaUrl;
 
+
+// ================================
+// STATE VOTING
+// ================================
+
 let lastVote = null;
 let sending = false;
+
+
+// ================================
+// DEBUG
+// ================================
 
 function debug(msg) {
   console.log("[PEMIRA]", msg);
   statusEl.textContent = `Dev ${dev} · ${msg}`;
 }
 
+
+// ================================
+// KIRIM VOTE
+// ================================
+
 function sendVote(paslon) {
-  if (sending || lastVote === paslon) return;
+
+  if (sending || lastVote === paslon) {
+    return;
+  }
+
   sending = true;
+
   debug(`mengirim ${paslon}...`);
 
   const url =
@@ -88,52 +155,96 @@ function sendVote(paslon) {
     `&paslon=${encodeURIComponent(paslon)}` +
     `&t=${Date.now()}`;
 
-  // GET sengaja dipakai agar tidak terkena masalah CORS/preflight seperti fetch POST.
+
+  // GET dipakai agar tidak terkena masalah
+  // CORS / preflight seperti fetch POST.
   const img = new Image();
+
+
   img.onload = () => {
+
     lastVote = paslon;
     sending = false;
+
     debug(`tersimpan: ${paslon}`);
   };
+
+
   img.onerror = () => {
-    // Apps Script kadang tetap menjalankan request walau image loader menganggap responsnya error.
+
+    // Apps Script kadang tetap menjalankan request
+    // walaupun image loader menganggap responsnya error.
     lastVote = paslon;
     sending = false;
+
     debug(`request dikirim: ${paslon}`);
   };
+
+
   img.src = url;
 }
 
+
+// ================================
+// TERIMA EVENT DARI FIGMA
+// ================================
+
 window.addEventListener("message", (event) => {
-  if (event.origin !== "https://www.figma.com") return;
+
+  if (event.origin !== "https://www.figma.com") {
+    return;
+  }
 
   const msg = event.data || {};
+
   console.log("[FIGMA EVENT]", msg);
 
+
+  // Figma selesai loading
   if (msg.type === "INITIAL_LOAD") {
+
     debug("Figma siap");
+
     return;
   }
 
+
+  // User berpindah screen
   if (msg.type === "PRESENTED_NODE_CHANGED") {
-    debug(`screen ${msg.data?.presentedNodeId || "-"}`);
+
+    debug(
+      `screen ${msg.data?.presentedNodeId || "-"}`
+    );
+
     return;
   }
 
+
+  // User melakukan klik
   if (msg.type === "MOUSE_PRESS_OR_RELEASE") {
+
     const d = msg.data || {};
+
     console.log("[FIGMA CLICK]", d);
 
+
     const target = d.targetNodeId;
+
+
     const paslon =
       CONFIG.VOTE_BUTTONS[target] ||
       CONFIG.VOTE_TEXT_NODES[target];
 
+
     if (paslon) {
+
       sendVote(paslon);
     }
   }
+
 });
 </script>
+
 </body>
 </html>
+```

@@ -5,6 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PEMIRA — Voting</title>
 
+  <!--
+    CATATAN PENTING (bukan bug di file ini, tapi wajib dicek
+    manual di Figma sebelum halaman ini dipakai):
+
+    Di Figma Developer App dengan Client ID di bawah
+    (FIGMA_CLIENT_ID), buka pengaturan "Allowed Embed Origins"
+    dan pastikan berisi PERSIS:
+
+        https://fawpaw.github.io
+
+    Tanpa "/PEMIRA", tanpa trailing slash. Kalau origin belum
+    diizinkan, iframe tetap bisa tampil secara visual, tapi
+    event postMessage (INITIAL_LOAD, PRESENTED_NODE_CHANGED,
+    MOUSE_PRESS_OR_RELEASE) yang dipakai script di bawah untuk
+    mendeteksi klik tombol vote bisa tidak stabil.
+  -->
+
   <style>
     html,
     body,
@@ -43,6 +60,11 @@
 
       opacity: 0;
       pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    #status.visible {
+      opacity: 1;
     }
   </style>
 </head>
@@ -83,10 +105,19 @@
       START_NODE_ID: "61-293",
 
       /*
-       * Google Apps Script Web App
+       * Google Apps Script Web App.
+       *
+       * Ambil dari: Apps Script editor > Deploy >
+       * Manage deployments > Web app URL (harus diakhiri /exec).
+       *
+       * PENTING: setiap kali Code.gs diedit, URL ini HANYA
+       * tetap valid kalau Anda deploy ulang lewat "Manage
+       * deployments" pada deployment yang SAMA (Edit > New
+       * version), bukan membuat "New deployment" baru yang
+       * akan menghasilkan URL /exec berbeda.
        */
       API_URL:
-        "https://script.google.com/macros/s/AKfycbzNGL-Oh0igs4seEXKuXY1FUPSkPM6lJzoRfqZT5wL8_a8OGyQCA775kExwElQxGGO0nw/exec",
+        "https://script.google.com/macros/s/AKfycbwZCDgEgayB0RMz6kiyT9v06Dq8cME0XU7co2Ay-mU3-nsvstXRu6xfDMSffP9TMKVbEw/exec",
 
       /*
        * Tombol konfirmasi vote.
@@ -110,7 +141,13 @@
         "133:1032": "Paslon 1",
         "133:934": "Paslon 2",
         "133:983": "Paslon 3"
-      }
+      },
+
+      /*
+       * Berapa lama menunggu response Apps Script sebelum
+       * dianggap timeout.
+       */
+      REQUEST_TIMEOUT_MS: 15000
     };
 
 
@@ -177,44 +214,41 @@
      * =========================================================
      * FIGMA EMBED URL
      * =========================================================
-     *
-     * PENTING:
-     * Jangan hapus tanda "+" pada akhir baris.
-     * String URL memang sedang disambung antarbaris.
      */
-const figmaUrl =
-  `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
-  `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-  `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-  `&embed-host=pemira-voting` +
-  `&client-id=${encodeURIComponent(CONFIG.FIGMA_CLIENT_ID)}`;
-     
 
-
-    /*
-     * Pasang URL ke iframe.
-     */
+    const figmaUrl =
+      `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
+      `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
+      `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
+      `&embed-host=pemira-voting` +
+      `&client-id=${encodeURIComponent(CONFIG.FIGMA_CLIENT_ID)}`;
 
     iframe.src = figmaUrl;
 
 
     /*
      * =========================================================
-     * DEBUG
+     * DEBUG / STATUS
      * =========================================================
      */
 
+    let statusHideTimer = null;
+
     function debug(message) {
+
       console.log("[PEMIRA]", message);
 
-      statusEl.textContent =
-        `Dev ${dev} · ${message}`;
+      statusEl.textContent = `Dev ${dev} · ${message}`;
+      statusEl.classList.add("visible");
+
+      if (statusHideTimer) {
+        clearTimeout(statusHideTimer);
+      }
+
+      statusHideTimer = setTimeout(() => {
+        statusEl.classList.remove("visible");
+      }, 4000);
     }
-
-
-    /*
-     * Tampilkan URL Figma untuk pengecekan.
-     */
 
     console.log("[PEMIRA] Figma URL:", figmaUrl);
     console.log("[PEMIRA] Dev:", dev);
@@ -226,231 +260,127 @@ const figmaUrl =
      * VOTING STATE
      * =========================================================
      */
+
     let sending = false;
 
 
     /*
      * =========================================================
-     * SEND VOTE
+     * SEND VOTE (JSONP)
      * =========================================================
+     *
+     * Dipakai karena target-nya Google Apps Script Web App dan
+     * kita ingin hindari isu CORS. Konsekuensinya: ini SELALU
+     * request GET. Code.gs sisi backend HARUS memproses vote
+     * di doGet (bukan doPost) supaya ini benar-benar tersimpan.
      */
 
-    /*
- * =========================================================
- * SEND VOTE
- * =========================================================
- */
+    function sendVote(paslon) {
 
-function sendVote(paslon) {
+      if (!paslon) {
+        return;
+      }
 
-  if (!paslon) {
-    return;
-  }
+      if (sending) {
+        console.log("[PEMIRA] Request masih berjalan.");
+        return;
+      }
 
+      sending = true;
+      debug(`mengirim ${paslon}...`);
 
-  /*
-   * Jangan kirim request baru kalau
-   * request sebelumnya masih berjalan.
-   */
-  if (sending) {
+      const callbackName = "__pemiraCallback";
 
-    console.log(
-      "[PEMIRA] Request masih berjalan."
-    );
+      if (window[callbackName]) {
+        delete window[callbackName];
+      }
 
-    return;
-  }
+      let finished = false;
+      let timeoutId = null;
 
+      const finish = () => {
 
-  /*
-   * Untuk sementara tetap mempertahankan
-   * aturan lama:
-   *
-   * satu Dev tidak mengirim Paslon yang sama
-   * dua kali dari halaman yang sama.
-   */
+        sending = false;
 
-  sending = true;
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
 
-  debug(`mengirim ${paslon}...`);
+        if (script && script.parentNode) {
+          script.parentNode.removeChild(script);
+        }
 
+        delete window[callbackName];
+      };
 
-  /*
-   * =======================================================
-   * JSONP CALLBACK
-   * =======================================================
-   *
-   * Backend Apps Script akan memanggil:
-   *
-   * window.__pemiraCallback(data)
-   *
-   * setelah request selesai.
-   */
+      window[callbackName] = (result) => {
 
-  const callbackName = "__pemiraCallback";
+        console.log("[PEMIRA] API response:", result);
 
+        if (finished) {
+          return;
+        }
 
-  /*
-   * Bersihkan callback lama kalau ada.
-   */
-  if (window[callbackName]) {
-    delete window[callbackName];
-  }
+        finished = true;
+        finish();
 
+        if (result && result.success === true) {
 
-  let finished = false;
+          debug(`tersimpan: ${paslon}`);
+          console.log("[PEMIRA] Vote BERHASIL disimpan:", paslon);
 
+        } else {
 
-  /*
-   * Fungsi untuk menyelesaikan request.
-   */
-  const finish = () => {
+          const errorMessage =
+            (result && result.error) || "Vote gagal disimpan.";
 
-    sending = false;
+          debug(`gagal: ${errorMessage}`);
+          console.error("[PEMIRA] Vote GAGAL:", errorMessage);
+        }
+      };
 
-    if (script && script.parentNode) {
-      script.parentNode.removeChild(script);
+      const script = document.createElement("script");
+
+      const url =
+        `${CONFIG.API_URL}` +
+        `?dev=${encodeURIComponent(dev)}` +
+        `&paslon=${encodeURIComponent(paslon)}` +
+        `&callback=${encodeURIComponent(callbackName)}` +
+        `&t=${Date.now()}`;
+
+      console.log("[PEMIRA] Vote URL:", url);
+
+      script.onerror = () => {
+
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        finish();
+
+        debug("gagal terhubung ke server.");
+        console.error("[PEMIRA] Request API gagal dimuat.");
+      };
+
+      script.src = url;
+      document.head.appendChild(script);
+
+      timeoutId = setTimeout(() => {
+
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        finish();
+
+        debug("server timeout.");
+        console.error("[PEMIRA] API timeout.");
+
+      }, CONFIG.REQUEST_TIMEOUT_MS);
     }
 
-    delete window[callbackName];
-  };
-
-
-  /*
-   * Callback dari Apps Script.
-   */
-  window[callbackName] = (result) => {
-
-    console.log(
-      "[PEMIRA] API response:",
-      result
-    );
-
-
-    /*
-     * Request berhasil sampai ke backend,
-     * tetapi kita tetap harus melihat
-     * nilai success.
-     */
-    if (result && result.success === true) {
-
-      finished = true;
-
-      finish();
-
-      debug(`tersimpan: ${paslon}`);
-
-      console.log(
-        "[PEMIRA] Vote BERHASIL disimpan:",
-        paslon
-      );
-
-      return;
-    }
-
-
-    /*
-     * Backend menjawab tetapi vote gagal.
-     */
-    finished = true;
-
-    finish();
-
-    const errorMessage =
-      result?.error ||
-      "Vote gagal disimpan.";
-
-    debug(`gagal: ${errorMessage}`);
-
-    console.error(
-      "[PEMIRA] Vote GAGAL:",
-      errorMessage
-    );
-  };
-
-
-  /*
-   * =======================================================
-   * BUAT SCRIPT REQUEST
-   * =======================================================
-   *
-   * Kita menggunakan JSONP karena request ini
-   * menuju Google Apps Script Web App.
-   */
-
-  const script = document.createElement("script");
-
-
-  const url =
-    `${CONFIG.API_URL}` +
-    `?dev=${encodeURIComponent(dev)}` +
-    `&paslon=${encodeURIComponent(paslon)}` +
-    `&callback=${encodeURIComponent(callbackName)}` +
-    `&t=${Date.now()}`;
-
-
-  console.log(
-    "[PEMIRA] Vote URL:",
-    url
-  );
-
-
-  /*
-   * Kalau browser gagal memuat response,
-   * callback tidak akan terpanggil.
-   */
-  script.onerror = () => {
-
-    if (finished) {
-      return;
-    }
-
-    finished = true;
-
-    finish();
-
-    debug("gagal terhubung ke server.");
-
-    console.error(
-      "[PEMIRA] Request API gagal dimuat."
-    );
-  };
-
-
-  /*
-   * Tambahkan script ke halaman.
-   */
-  script.src = url;
-
-  document.head.appendChild(script);
-
-
-  /*
-   * =======================================================
-   * TIMEOUT
-   * =======================================================
-   *
-   * Kalau server tidak memberikan response
-   * dalam 15 detik, anggap request gagal.
-   */
-  setTimeout(() => {
-
-    if (finished) {
-      return;
-    }
-
-    finished = true;
-
-    finish();
-
-    debug("server timeout.");
-
-    console.error(
-      "[PEMIRA] API timeout."
-    );
-
-  }, 15000);
-}
 
     /*
      * =========================================================
@@ -461,11 +391,7 @@ function sendVote(paslon) {
     iframe.addEventListener("load", () => {
 
       debug("Figma iframe loaded");
-
-      console.log(
-        "[PEMIRA] iframe loaded:",
-        iframe.src
-      );
+      console.log("[PEMIRA] iframe loaded:", iframe.src);
     });
 
 
@@ -477,10 +403,6 @@ function sendVote(paslon) {
 
     window.addEventListener("message", (event) => {
 
-      /*
-       * Event Figma Embed API berasal dari Figma.
-       */
-
       if (
         event.origin !== "https://www.figma.com" &&
         event.origin !== "https://embed.figma.com"
@@ -488,120 +410,50 @@ function sendVote(paslon) {
         return;
       }
 
-
       const msg = event.data || {};
 
-      console.log(
-        "[FIGMA EVENT]",
-        msg
-      );
-
-
-      /*
-       * ---------------------------------------------------------
-       * INITIAL LOAD
-       * ---------------------------------------------------------
-       */
+      console.log("[FIGMA EVENT]", msg);
 
       if (msg.type === "INITIAL_LOAD") {
-
         debug("Figma siap");
-
         return;
       }
-
-
-      /*
-       * ---------------------------------------------------------
-       * PRESENTED NODE CHANGED
-       * ---------------------------------------------------------
-       */
 
       if (msg.type === "PRESENTED_NODE_CHANGED") {
 
-        const presentedNodeId =
-          msg.data?.presentedNodeId || "-";
+        const presentedNodeId = (msg.data && msg.data.presentedNodeId) || "-";
 
-        debug(
-          `screen ${presentedNodeId}`
-        );
-
+        debug(`screen ${presentedNodeId}`);
         return;
       }
-
-
-      /*
-       * ---------------------------------------------------------
-       * MOUSE PRESS / RELEASE
-       * ---------------------------------------------------------
-       */
 
       if (msg.type === "MOUSE_PRESS_OR_RELEASE") {
 
         const data = msg.data || {};
 
-        console.log(
-          "[FIGMA CLICK]",
-          data
-        );
-
-
-        /*
-         * Ambil target node.
-         */
+        console.log("[FIGMA CLICK]", data);
 
         const targetNode =
           data.targetNodeId ||
           data.nodeId ||
-          data.target?.id ||
+          (data.target && data.target.id) ||
           null;
 
-
-        console.log(
-          "[FIGMA CLICK] target:",
-          targetNode
-        );
-
-
-        /*
-         * Cari Paslon berdasarkan:
-         *
-         * 1. Button node
-         * 2. Text node
-         */
+        console.log("[FIGMA CLICK] target:", targetNode);
 
         const paslon =
           CONFIG.VOTE_BUTTONS[targetNode] ||
           CONFIG.VOTE_TEXT_NODES[targetNode] ||
           null;
 
-
-        /*
-         * Jika tombol vote ditemukan.
-         */
-
         if (paslon) {
 
-          console.log(
-            "[PEMIRA] TOMBOL VOTE TERDETEKSI:",
-            paslon
-          );
-
+          console.log("[PEMIRA] TOMBOL VOTE TERDETEKSI:", paslon);
           sendVote(paslon);
-
           return;
         }
 
-
-        /*
-         * Kalau bukan tombol vote,
-         * hanya tampilkan event untuk debugging.
-         */
-
-        console.log(
-          "[PEMIRA] Klik bukan tombol vote:",
-          targetNode
-        );
+        console.log("[PEMIRA] Klik bukan tombol vote:", targetNode);
       }
     });
 
@@ -612,26 +464,11 @@ function sendVote(paslon) {
      * =========================================================
      */
 
-    console.log(
-      "[PEMIRA] Application started."
-    );
-
-    console.log(
-      "[PEMIRA] Dev mode:",
-      dev
-    );
-
-    console.log(
-      "[PEMIRA] iframe:",
-      iframe
-    );
-
-    console.log(
-      "[PEMIRA] iframe src:",
-      iframe.src
-    );
+    console.log("[PEMIRA] Application started.");
+    console.log("[PEMIRA] Dev mode:", dev);
+    console.log("[PEMIRA] iframe:", iframe);
+    console.log("[PEMIRA] iframe src:", iframe.src);
   </script>
 
 </body>
 </html>
-```

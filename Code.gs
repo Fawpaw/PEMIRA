@@ -1,25 +1,58 @@
 const SHEET_NAME = "Votes";
 const DEV_LIST = ["1", "2", "3"];
 
+
+/*
+ * =========================================================
+ * GET
+ * =========================================================
+ */
+
 function doGet(e) {
-  const params = e && e.parameter ? e.parameter : {};
+
+  const params = e && e.parameter
+    ? e.parameter
+    : {};
 
   const dev = String(params.dev || "")
     .replace(/^Dev\s+/i, "")
     .trim();
 
-  const paslon = String(params.paslon || "").trim();
+  const paslon = String(params.paslon || "")
+    .trim();
 
-  const callback = String(params.callback || "").trim();
+  const callback = String(params.callback || "")
+    .trim();
+
+
+  /*
+   * =======================================================
+   * VALIDASI DEV
+   * =======================================================
+   */
 
   if (!DEV_LIST.includes(dev)) {
+
     return json({
       success: false,
       error: "Dev harus 1, 2, atau 3."
     }, callback);
   }
 
+
+  /*
+   * =======================================================
+   * VALIDASI PASLON
+   * =======================================================
+   *
+   * Kalau paslon kosong, hanya cek apakah
+   * Dev valid.
+   *
+   * Ini berguna untuk test endpoint.
+   */
+
   if (!paslon) {
+
     return json({
       success: true,
       message: "Dev valid.",
@@ -27,29 +60,70 @@ function doGet(e) {
     }, callback);
   }
 
+
+  /*
+   * =======================================================
+   * VALIDASI PASLON
+   * =======================================================
+   */
+
   if (!/^Paslon [123]$/.test(paslon)) {
+
     return json({
       success: false,
       error: "Paslon tidak valid."
     }, callback);
   }
 
+
+  /*
+   * =======================================================
+   * LOCK
+   * =======================================================
+   *
+   * Mencegah dua request menulis Sheet
+   * secara bersamaan.
+   */
+
   const lock = LockService.getScriptLock();
 
+
   try {
+
     lock.waitLock(10000);
+
+
+    /*
+     * =====================================================
+     * SPREADSHEET
+     * =====================================================
+     */
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
     let sheet = ss.getSheetByName(SHEET_NAME);
 
+
+    /*
+     * Kalau Sheet Votes belum ada,
+     * buat Sheet + header.
+     */
+
     if (!sheet) {
+
       sheet = ss.insertSheet(SHEET_NAME);
 
       sheet.getRange("A1:C1").setValues([
         ["Timeline", "Paslon", "Dev"]
       ]);
     }
+
+
+    /*
+     * =====================================================
+     * SIMPAN VOTE
+     * =====================================================
+     */
 
     const timestamp = new Date();
 
@@ -59,6 +133,13 @@ function doGet(e) {
       "Dev " + dev
     ]);
 
+
+    /*
+     * =====================================================
+     * SUCCESS RESPONSE
+     * =====================================================
+     */
+
     return json({
       success: true,
       dev: "Dev " + dev,
@@ -66,81 +147,136 @@ function doGet(e) {
       timestamp: timestamp.toISOString()
     }, callback);
 
+
   } catch (error) {
+
+
+    /*
+     * =====================================================
+     * ERROR RESPONSE
+     * =====================================================
+     */
 
     return json({
       success: false,
       error: String(error)
     }, callback);
 
+
   } finally {
 
+
+    /*
+     * =====================================================
+     * RELEASE LOCK
+     * =====================================================
+     */
+
     try {
+
       lock.releaseLock();
+
     } catch (error) {
-      // Abaikan.
+
+      // Tidak perlu melakukan apa-apa.
+
     }
   }
 }
 
 
+/*
+ * =========================================================
+ * POST
+ * =========================================================
+ */
+
 function doPost(e) {
+
   return doGet(e);
 }
 
 
 /*
  * =========================================================
- * JSON RESPONSE / JSONP RESPONSE
+ * JSON / JSONP RESPONSE
  * =========================================================
  */
 
 function json(obj, callback) {
 
-  /*
-   * Kalau tidak ada callback,
-   * tetap kembalikan JSON biasa.
-   */
-  if (!callback) {
-    return ContentService
-      .createTextOutput(JSON.stringify(obj))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
 
   /*
-   * Batasi nama callback agar tidak bisa
-   * diisi sembarang JavaScript.
+   * =======================================================
+   * JSON BIASA
+   * =======================================================
    *
-   * Contoh valid:
-   * __pemiraCallback
-   * pemira.callback
+   * Dipakai kalau callback tidak diberikan.
    */
-  if (!/^[A-Za-z_$][0-9A-Za-z_$]*(\.[A-Za-z_$][0-9A-Za-z_$]*)*$/.test(callback)) {
+
+  if (!callback) {
 
     return ContentService
-      .createTextOutput(JSON.stringify({
-        success: false,
-        error: "Callback tidak valid."
-      }))
-      .setMimeType(ContentService.MimeType.JSON);
+      .createTextOutput(
+        JSON.stringify(obj)
+      )
+      .setMimeType(
+        ContentService.MimeType.JSON
+      );
   }
 
 
   /*
-   * JSONP:
+   * =======================================================
+   * VALIDASI CALLBACK
+   * =======================================================
+   *
+   * Frontend PEMIRA hanya menggunakan:
+   *
+   * __pemiraCallback
+   *
+   * Jadi kita tidak perlu menerima callback
+   * dengan nama lain.
+   */
+
+  if (callback !== "__pemiraCallback") {
+
+    return ContentService
+      .createTextOutput(
+        JSON.stringify({
+          success: false,
+          error: "Callback tidak valid."
+        })
+      )
+      .setMimeType(
+        ContentService.MimeType.JSON
+      );
+  }
+
+
+  /*
+   * =======================================================
+   * JSONP
+   * =======================================================
+   *
+   * Hasil:
    *
    * __pemiraCallback({
-   *   success: true
-   * })
+   *   success: true,
+   *   ...
+   * });
    */
+
   const output =
     callback +
     "(" +
     JSON.stringify(obj) +
     ");";
 
+
   return ContentService
     .createTextOutput(output)
-    .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    .setMimeType(
+      ContentService.MimeType.JAVASCRIPT
+    );
 }

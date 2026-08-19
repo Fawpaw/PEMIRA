@@ -4,7 +4,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
   <title>PEMIRA — Voting</title>
 
   <style>
@@ -22,7 +21,7 @@
       position: relative;
     }
 
-    iframe {
+    #figma {
       display: block;
       width: 100%;
       height: 100%;
@@ -45,543 +44,459 @@
 
       opacity: 0;
       pointer-events: none;
-
-      transition: opacity 0.2s;
     }
   </style>
 </head>
 
 <body>
 
-<div id="app">
-
-  <iframe
-    id="figma"
-    allowfullscreen
-  ></iframe>
-
-  <div id="status"></div>
-
-</div>
-
-
-<script>
-/* =========================================================
-   CONFIGURATION
-   ========================================================= */
-
-const CONFIG = {
-
-  /* Figma prototype */
-  FIGMA_FILE_KEY: "ye6WV9CRpb5QpyPNjcD7o7",
-
-  /* Figma Embed API Client ID */
-  FIGMA_CLIENT_ID: "WtJAjvjMcjz1x0tX3D8kgZ",
-
-  /* Starting point prototype */
-  START_NODE_ID: "61-293",
-
-  /* Google Apps Script Web App */
-  API_URL:
-    "https://script.google.com/macros/s/AKfycbzNGL-Oh0igs4seEXKuXY1FUPSkPM6lJzoRfqZT5wL8_a8OGyQCA775kExwElQxGGO0nw/exec",
-
-
-  /*
-   * Tombol konfirmasi vote.
-   *
-   * Format:
-   * "NODE_ID": "NAMA PASLON"
-   */
-  VOTE_BUTTONS: {
-
-    "133:1031": "Paslon 1",
-
-    "133:933": "Paslon 2",
-
-    "133:982": "Paslon 3"
-
-  },
-
-
-  /*
-   * Beberapa prototype bisa mengirim
-   * node ID dari TEXT di dalam tombol,
-   * bukan node tombolnya sendiri.
-   *
-   * Tambahkan node text kalau nanti
-   * ditemukan dari Console.
-   */VOTE_TEXT_NODES: {
-  "133:1032": "Paslon 1",
-  "133:934": "Paslon 2",
-  "133:983": "Paslon 3"
-}
-
-    // Contoh jika nanti diketahui:
-    // "133:XXXX": "Paslon 2",
-    // "133:YYYY": "Paslon 3"
-
-  }
-
-};
-
-
-/* =========================================================
-   DEV PARAMETER
-   ========================================================= */
-
-const params = new URLSearchParams(window.location.search);
-
-const dev = params.get("dev");
-
-
-/*
- * Hanya menerima:
- *
- * ?dev=1
- * ?dev=2
- * ?dev=3
- */
-
-if (!["1", "2", "3"].includes(dev)) {
-
-  document.body.innerHTML =
-    `
-    <div
-      style="
-        font: 20px system-ui;
-        color: white;
-        padding: 30px;
-      "
-    >
-      Link Dev tidak valid.
-      <br><br>
-      Gunakan:
-      <br>
-      ?dev=1
-      <br>
-      ?dev=2
-      <br>
-      ?dev=3
-    </div>
-    `;
-
-  throw new Error("Invalid dev parameter");
-
-}
-
-
-/* =========================================================
-   ELEMENTS
-   ========================================================= */
-
-const iframe = document.getElementById("figma");
-
-const statusEl = document.getElementById("status");
-
-
-/* =========================================================
-   STATUS / DEBUG
-   ========================================================= */
-
-function debug(message) {
-
-  console.log("[PEMIRA]", message);
-
-  statusEl.textContent =
-    `Dev ${dev} · ${message}`;
-
-}
-
-
-/* =========================================================
-   BUILD FIGMA URL
-   ========================================================= */
-
-/*
- * Figma Embed API membutuhkan:
- *
- * client-id
- *
- * karena kita ingin menerima event
- * MOUSE_PRESS_OR_RELEASE dari prototype.
- */
-
-const figmaUrl =
-  `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
-  `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-  `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-  `&embed-host=pemira-voting` 
-  `&client-id=${encodeURIComponent(CONFIG.FIGMA_CLIENT_ID)}`;
-
-
-/*
- * Tampilkan URL di Console supaya
- * gampang mengecek apakah client-id
- * benar-benar masuk.
- */
-
-console.log("[PEMIRA] Figma URL:", figmaUrl);
-
-
-/*
- * Pasang URL ke iframe.
- */
-
-iframe.src = figmaUrl;
-
-
-/* =========================================================
-   VOTING STATE
-   ========================================================= */
-
-let lastVote = null;
-
-let sending = false;
-
-
-/* =========================================================
-   SEND VOTE TO GOOGLE APPS SCRIPT
-   ========================================================= */
-
-function sendVote(paslon) {
-
-  /*
-   * Jangan kirim dua kali ketika request
-   * yang sama masih berjalan.
-   */
-  if (sending) {
-
-    console.log(
-      "[PEMIRA] Request masih berjalan, abaikan klik."
-    );
-
-    return;
-  }
-
-
-  /*
-   * Jangan simpan vote paslon yang sama
-   * dua kali pada sesi yang sama.
-   */
-  if (lastVote === paslon) {
-
-    console.log(
-      "[PEMIRA] Vote yang sama sudah dikirim:",
-      paslon
-    );
-
-    return;
-  }
-
-
-  sending = true;
-
-
-  debug(`mengirim ${paslon}...`);
-
-
-  /*
-   * GET dipakai supaya browser tidak melakukan
-   * CORS preflight seperti pada POST/fetch.
-   */
-
-  const url =
-    `${CONFIG.API_URL}` +
-    `?dev=${encodeURIComponent(dev)}` +
-    `&paslon=${encodeURIComponent(paslon)}` +
-    `&t=${Date.now()}`;
-
-
-  console.log("[PEMIRA] API URL:", url);
-
-
-  /*
-   * Image request digunakan hanya sebagai
-   * cara sederhana untuk mengirim GET
-   * lintas-origin.
-   */
-
-  const img = new Image();
-
-
-  img.onload = () => {
-
-    lastVote = paslon;
-
-    sending = false;
-
-    debug(`tersimpan: ${paslon}`);
-
-    console.log(
-      "[PEMIRA] Apps Script request selesai:",
-      paslon
-    );
-
-  };
-
-
-  img.onerror = () => {
-
+  <div id="app">
+    <iframe
+      id="figma"
+      allowfullscreen>
+    </iframe>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
     /*
-     * Apps Script Web App kadang melakukan redirect
-     * sehingga Image loader bisa menganggap response
-     * sebagai error walaupun request sebenarnya sudah
-     * sampai ke Apps Script.
+     * =========================================================
+     * CONFIGURATION
+     * =========================================================
      */
 
-    lastVote = paslon;
-
-    sending = false;
-
-    debug(`request dikirim: ${paslon}`);
-
-    console.log(
-      "[PEMIRA] Image request selesai/error-load:",
-      paslon
-    );
-
-  };
-
-
-  img.src = url;
-
-}
-
-
-/* =========================================================
-   FIGMA EMBED API EVENTS
-   ========================================================= */
-
-window.addEventListener("message", (event) => {
-
-  /*
-   * Event resmi dari prototype Figma berasal dari:
-   *
-   * https://www.figma.com
-   */
-
-  if (event.origin !== "https://www.figma.com") {
-
-    return;
-  }
-
-
-  /*
-   * Pastikan message memang datang
-   * dari iframe Figma kita.
-   */
-
-  if (event.source !== iframe.contentWindow) {
-
-    return;
-  }
-
-
-  const msg = event.data || {};
-
-
-  console.log("[FIGMA EVENT]", msg);
-
-
-  /* =====================================================
-     INITIAL LOAD
-     ===================================================== */
-
-  if (msg.type === "INITIAL_LOAD") {
-
-    debug("Figma siap");
-
-    return;
-  }
-
-
-  /* =====================================================
-     PRESENTED NODE CHANGED
-     ===================================================== */
-
-  if (msg.type === "PRESENTED_NODE_CHANGED") {
-
-    const presentedNodeId =
-      msg.data?.presentedNodeId || "-";
-
-
-    debug(
-      `screen ${presentedNodeId}`
-    );
-
-    return;
-  }
-
-
-  /* =====================================================
-     MOUSE PRESS / RELEASE
-     ===================================================== */
-
-  if (msg.type === "MOUSE_PRESS_OR_RELEASE") {
-
-    const data = msg.data || {};
-
-
-    console.log(
-      "[FIGMA CLICK DATA]",
-      data
-    );
-
-
-    /*
-     * targetNodeId adalah node paling bawah
-     * yang berada di bawah cursor.
-     */
-
-    const targetNodeId =
-      data.targetNodeId;
-
-
-    const presentedNodeId =
-      data.presentedNodeId;
-
-
-    const handled =
-      data.handled;
-
-
-    console.log(
-      "[FIGMA CLICK]",
-      {
-        targetNodeId,
-        presentedNodeId,
-        handled
-      }
-    );
-
-
-    /*
-     * Cari apakah node yang diklik
-     * merupakan tombol vote.
-     */
-
-    const paslon =
-      CONFIG.VOTE_BUTTONS[targetNodeId] ||
-      CONFIG.VOTE_TEXT_NODES[targetNodeId];
-
-
-    if (paslon) {
-
-      console.log(
-        "[PEMIRA] TOMBOL VOTE TERDETEKSI:",
-        paslon
-      );
-
-
-      sendVote(paslon);
-
-    } else {
+    const CONFIG = {
 
       /*
-       * Jangan anggap semua klik sebagai vote.
-       * Hanya node yang sudah kita daftarkan
-       * yang akan dikirim ke Apps Script.
+       * Figma prototype
        */
+      FIGMA_FILE_KEY: "ye6WV9CRpb5QpyPNjcD7o7",
 
-      console.log(
-        "[PEMIRA] Klik bukan tombol vote:",
-        targetNodeId
-      );
+      /*
+       * Figma Embed API Client ID
+       */
+      FIGMA_CLIENT_ID: "WtJAjvjMcjz1x0tX3D8kgZ",
 
+      /*
+       * Starting point prototype
+       */
+      START_NODE_ID: "61-293",
+
+      /*
+       * Google Apps Script Web App
+       */
+      API_URL:
+        "https://script.google.com/macros/s/AKfycbzNGL-Oh0igs4seEXKuXY1FUPSkPM6lJzoRfqZT5wL8_a8OGyQCA775kExwElQxGGO0nw/exec",
+
+      /*
+       * Tombol konfirmasi vote.
+       *
+       * Format:
+       * "NODE_ID": "PASLON"
+       */
+      VOTE_BUTTONS: {
+        "133:1031": "Paslon 1",
+        "133:933": "Paslon 2",
+        "133:982": "Paslon 3"
+      },
+
+      /*
+       * Text node di dalam tombol.
+       *
+       * Dipakai sebagai fallback apabila event Figma
+       * mengembalikan ID text layer, bukan parent button.
+       */
+      VOTE_TEXT_NODES: {
+        "133:1032": "Paslon 1",
+        "133:934": "Paslon 2",
+        "133:983": "Paslon 3"
+      }
+    };
+
+
+    /*
+     * =========================================================
+     * DEV MODE
+     * =========================================================
+     */
+
+    const params = new URLSearchParams(window.location.search);
+    const dev = params.get("dev");
+
+    if (!["1", "2", "3"].includes(dev)) {
+
+      document.body.innerHTML = `
+        <div style="
+          font: 20px system-ui, sans-serif;
+          color: white;
+          padding: 30px;
+        ">
+          Link Dev tidak valid.
+          Gunakan ?dev=1, ?dev=2, atau ?dev=3.
+        </div>
+      `;
+
+      throw new Error("Invalid dev parameter");
     }
 
 
-    return;
-  }
+    /*
+     * =========================================================
+     * ELEMENTS
+     * =========================================================
+     */
+
+    const iframe = document.getElementById("figma");
+    const statusEl = document.getElementById("status");
 
 
-  /* =====================================================
-     OTHER FIGMA EVENTS
-     ===================================================== */
+    /*
+     * =========================================================
+     * VALIDATE CONFIG
+     * =========================================================
+     */
 
-  if (msg.type === "NEW_STATE") {
+    if (!CONFIG.FIGMA_FILE_KEY) {
+      throw new Error("FIGMA_FILE_KEY belum diisi.");
+    }
+
+    if (!CONFIG.FIGMA_CLIENT_ID) {
+      throw new Error("FIGMA_CLIENT_ID belum diisi.");
+    }
+
+    if (!CONFIG.START_NODE_ID) {
+      throw new Error("START_NODE_ID belum diisi.");
+    }
+
+    if (!CONFIG.API_URL) {
+      throw new Error("API_URL belum diisi.");
+    }
+
+
+    /*
+     * =========================================================
+     * FIGMA EMBED URL
+     * =========================================================
+     *
+     * PENTING:
+     * Jangan hapus tanda "+" pada akhir baris.
+     * String URL memang sedang disambung antarbaris.
+     */
+
+    const figmaUrl =
+      `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
+      `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
+      `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
+      `&embed-host=pemira-voting` +
+      `&client-id=${encodeURIComponent(CONFIG.FIGMA_CLIENT_ID)}`;
+
+
+    /*
+     * Pasang URL ke iframe.
+     */
+
+    iframe.src = figmaUrl;
+
+
+    /*
+     * =========================================================
+     * DEBUG
+     * =========================================================
+     */
+
+    function debug(message) {
+      console.log("[PEMIRA]", message);
+
+      statusEl.textContent =
+        `Dev ${dev} · ${message}`;
+    }
+
+
+    /*
+     * Tampilkan URL Figma untuk pengecekan.
+     */
+
+    console.log("[PEMIRA] Figma URL:", figmaUrl);
+    console.log("[PEMIRA] Dev:", dev);
+    console.log("[PEMIRA] API URL:", CONFIG.API_URL);
+
+
+    /*
+     * =========================================================
+     * VOTING STATE
+     * =========================================================
+     */
+
+    let lastVote = null;
+    let sending = false;
+
+
+    /*
+     * =========================================================
+     * SEND VOTE
+     * =========================================================
+     */
+
+    function sendVote(paslon) {
+
+      if (!paslon) {
+        return;
+      }
+
+      if (sending) {
+        console.log(
+          "[PEMIRA] Request masih berjalan."
+        );
+        return;
+      }
+
+      if (lastVote === paslon) {
+        console.log(
+          "[PEMIRA] Vote yang sama sudah dikirim:",
+          paslon
+        );
+        return;
+      }
+
+      sending = true;
+
+      debug(`mengirim ${paslon}...`);
+
+      const url =
+        `${CONFIG.API_URL}` +
+        `?dev=${encodeURIComponent(dev)}` +
+        `&paslon=${encodeURIComponent(paslon)}` +
+        `&t=${Date.now()}`;
+
+      console.log("[PEMIRA] Vote URL:", url);
+
+
+      /*
+       * Image request dipakai supaya tidak terkena
+       * CORS/preflight seperti fetch POST.
+       */
+
+      const img = new Image();
+
+      img.onload = () => {
+
+        lastVote = paslon;
+        sending = false;
+
+        debug(`tersimpan: ${paslon}`);
+
+        console.log(
+          "[PEMIRA] Vote berhasil dikirim:",
+          paslon
+        );
+      };
+
+
+      img.onerror = () => {
+
+        /*
+         * Apps Script kadang tetap memproses GET
+         * walaupun browser menganggap response image
+         * sebagai error.
+         */
+
+        lastVote = paslon;
+        sending = false;
+
+        debug(`request dikirim: ${paslon}`);
+
+        console.log(
+          "[PEMIRA] Request selesai dikirim:",
+          paslon
+        );
+      };
+
+
+      img.src = url;
+    }
+
+
+    /*
+     * =========================================================
+     * FIGMA IFRAME LOAD
+     * =========================================================
+     */
+
+    iframe.addEventListener("load", () => {
+
+      debug("Figma iframe loaded");
+
+      console.log(
+        "[PEMIRA] iframe loaded:",
+        iframe.src
+      );
+    });
+
+
+    /*
+     * =========================================================
+     * FIGMA MESSAGE EVENTS
+     * =========================================================
+     */
+
+    window.addEventListener("message", (event) => {
+
+      /*
+       * Event Figma Embed API berasal dari Figma.
+       */
+
+      if (
+        event.origin !== "https://www.figma.com" &&
+        event.origin !== "https://embed.figma.com"
+      ) {
+        return;
+      }
+
+
+      const msg = event.data || {};
+
+      console.log(
+        "[FIGMA EVENT]",
+        msg
+      );
+
+
+      /*
+       * ---------------------------------------------------------
+       * INITIAL LOAD
+       * ---------------------------------------------------------
+       */
+
+      if (msg.type === "INITIAL_LOAD") {
+
+        debug("Figma siap");
+
+        return;
+      }
+
+
+      /*
+       * ---------------------------------------------------------
+       * PRESENTED NODE CHANGED
+       * ---------------------------------------------------------
+       */
+
+      if (msg.type === "PRESENTED_NODE_CHANGED") {
+
+        const presentedNodeId =
+          msg.data?.presentedNodeId || "-";
+
+        debug(
+          `screen ${presentedNodeId}`
+        );
+
+        return;
+      }
+
+
+      /*
+       * ---------------------------------------------------------
+       * MOUSE PRESS / RELEASE
+       * ---------------------------------------------------------
+       */
+
+      if (msg.type === "MOUSE_PRESS_OR_RELEASE") {
+
+        const data = msg.data || {};
+
+        console.log(
+          "[FIGMA CLICK]",
+          data
+        );
+
+
+        /*
+         * Ambil target node.
+         */
+
+        const targetNode =
+          data.targetNodeId ||
+          data.nodeId ||
+          data.target?.id ||
+          null;
+
+
+        console.log(
+          "[FIGMA CLICK] target:",
+          targetNode
+        );
+
+
+        /*
+         * Cari Paslon berdasarkan:
+         *
+         * 1. Button node
+         * 2. Text node
+         */
+
+        const paslon =
+          CONFIG.VOTE_BUTTONS[targetNode] ||
+          CONFIG.VOTE_TEXT_NODES[targetNode] ||
+          null;
+
+
+        /*
+         * Jika tombol vote ditemukan.
+         */
+
+        if (paslon) {
+
+          console.log(
+            "[PEMIRA] TOMBOL VOTE TERDETEKSI:",
+            paslon
+          );
+
+          sendVote(paslon);
+
+          return;
+        }
+
+
+        /*
+         * Kalau bukan tombol vote,
+         * hanya tampilkan event untuk debugging.
+         */
+
+        console.log(
+          "[PEMIRA] Klik bukan tombol vote:",
+          targetNode
+        );
+      }
+    });
+
+
+    /*
+     * =========================================================
+     * STARTUP LOG
+     * =========================================================
+     */
 
     console.log(
-      "[FIGMA NEW STATE]",
-      msg.data
+      "[PEMIRA] Application started."
     );
-
-    return;
-  }
-
-
-  if (msg.type === "REQUEST_CLOSE") {
 
     console.log(
-      "[FIGMA REQUEST CLOSE]"
+      "[PEMIRA] Dev mode:",
+      dev
     );
 
-    return;
-  }
-
-
-  if (msg.type === "LOGIN_SCREEN_SHOWN") {
-
-    console.warn(
-      "[FIGMA] Login screen ditampilkan."
+    console.log(
+      "[PEMIRA] iframe:",
+      iframe
     );
 
-    return;
-  }
-
-
-  if (msg.type === "PASSWORD_SCREEN_SHOWN") {
-
-    console.warn(
-      "[FIGMA] Password screen ditampilkan."
+    console.log(
+      "[PEMIRA] iframe src:",
+      iframe.src
     );
+  </script>
 
-    return;
-  }
-
-});
-
-
-/* =========================================================
-   IFRAME LOAD
-   ========================================================= */
-
-iframe.addEventListener("load", () => {
-
-  console.log(
-    "[PEMIRA] iframe load selesai."
-  );
-
-  console.log(
-    "[PEMIRA] iframe src:",
-    iframe.src
-  );
-
-});
-
-
-/* =========================================================
-   STARTUP DEBUG
-   ========================================================= */
-
-console.log(
-  "[PEMIRA] Dev:",
-  dev
-);
-
-console.log(
-  "[PEMIRA] Client ID:",
-  CONFIG.FIGMA_CLIENT_ID
-);
-
-console.log(
-  "[PEMIRA] Starting Node:",
-  CONFIG.START_NODE_ID
-);
-
-console.log(
-  "[PEMIRA] API:",
-  CONFIG.API_URL
-);
-
+</body>
+</html>
 ```

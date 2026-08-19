@@ -226,8 +226,6 @@
      * VOTING STATE
      * =========================================================
      */
-
-    let lastVote = null;
     let sending = false;
 
 
@@ -337,8 +335,6 @@ function sendVote(paslon) {
     if (result && result.success === true) {
 
       finished = true;
-
-      lastVote = paslon;
 
       finish();
 

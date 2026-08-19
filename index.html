@@ -182,12 +182,12 @@
      * Jangan hapus tanda "+" pada akhir baris.
      * String URL memang sedang disambung antarbaris.
      */
-
-    const figmaUrl =
-      `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
-      `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-      `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
-      `&embed-host=pemira-voting` 
+const figmaUrl =
+  `https://embed.figma.com/proto/${CONFIG.FIGMA_FILE_KEY}/IT-DOK-PEMIRA` +
+  `?node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
+  `&starting-point-node-id=${encodeURIComponent(CONFIG.START_NODE_ID)}` +
+  `&embed-host=pemira-voting` +
+  `&client-id=${encodeURIComponent(CONFIG.FIGMA_CLIENT_ID)}`;
      
 
 

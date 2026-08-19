@@ -271,16 +271,6 @@ function sendVote(paslon) {
    * satu Dev tidak mengirim Paslon yang sama
    * dua kali dari halaman yang sama.
    */
-  if (lastVote === paslon) {
-
-    console.log(
-      "[PEMIRA] Vote yang sama sudah dikirim:",
-      paslon
-    );
-
-    return;
-  }
-
 
   sending = true;
 

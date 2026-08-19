@@ -238,84 +238,234 @@
      * =========================================================
      */
 
-    function sendVote(paslon) {
+    /*
+ * =========================================================
+ * SEND VOTE
+ * =========================================================
+ */
 
-      if (!paslon) {
-        return;
-      }
+function sendVote(paslon) {
 
-      if (sending) {
-        console.log(
-          "[PEMIRA] Request masih berjalan."
-        );
-        return;
-      }
-
-      if (lastVote === paslon) {
-        console.log(
-          "[PEMIRA] Vote yang sama sudah dikirim:",
-          paslon
-        );
-        return;
-      }
-
-      sending = true;
-
-      debug(`mengirim ${paslon}...`);
-
-      const url =
-        `${CONFIG.API_URL}` +
-        `?dev=${encodeURIComponent(dev)}` +
-        `&paslon=${encodeURIComponent(paslon)}` +
-        `&t=${Date.now()}`;
-
-      console.log("[PEMIRA] Vote URL:", url);
+  if (!paslon) {
+    return;
+  }
 
 
-      /*
-       * Image request dipakai supaya tidak terkena
-       * CORS/preflight seperti fetch POST.
-       */
+  /*
+   * Jangan kirim request baru kalau
+   * request sebelumnya masih berjalan.
+   */
+  if (sending) {
 
-      const img = new Image();
+    console.log(
+      "[PEMIRA] Request masih berjalan."
+    );
 
-      img.onload = () => {
-
-        lastVote = paslon;
-        sending = false;
-
-        debug(`tersimpan: ${paslon}`);
-
-        console.log(
-          "[PEMIRA] Vote berhasil dikirim:",
-          paslon
-        );
-      };
+    return;
+  }
 
 
-      img.onerror = () => {
+  /*
+   * Untuk sementara tetap mempertahankan
+   * aturan lama:
+   *
+   * satu Dev tidak mengirim Paslon yang sama
+   * dua kali dari halaman yang sama.
+   */
+  if (lastVote === paslon) {
 
-        /*
-         * Apps Script kadang tetap memproses GET
-         * walaupun browser menganggap response image
-         * sebagai error.
-         */
+    console.log(
+      "[PEMIRA] Vote yang sama sudah dikirim:",
+      paslon
+    );
 
-        lastVote = paslon;
-        sending = false;
-
-        debug(`request dikirim: ${paslon}`);
-
-        console.log(
-          "[PEMIRA] Request selesai dikirim:",
-          paslon
-        );
-      };
+    return;
+  }
 
 
-      img.src = url;
+  sending = true;
+
+  debug(`mengirim ${paslon}...`);
+
+
+  /*
+   * =======================================================
+   * JSONP CALLBACK
+   * =======================================================
+   *
+   * Backend Apps Script akan memanggil:
+   *
+   * window.__pemiraCallback(data)
+   *
+   * setelah request selesai.
+   */
+
+  const callbackName = "__pemiraCallback";
+
+
+  /*
+   * Bersihkan callback lama kalau ada.
+   */
+  if (window[callbackName]) {
+    delete window[callbackName];
+  }
+
+
+  let finished = false;
+
+
+  /*
+   * Fungsi untuk menyelesaikan request.
+   */
+  const finish = () => {
+
+    sending = false;
+
+    if (script && script.parentNode) {
+      script.parentNode.removeChild(script);
     }
 
+    delete window[callbackName];
+  };
+
+
+  /*
+   * Callback dari Apps Script.
+   */
+  window[callbackName] = (result) => {
+
+    console.log(
+      "[PEMIRA] API response:",
+      result
+    );
+
+
+    /*
+     * Request berhasil sampai ke backend,
+     * tetapi kita tetap harus melihat
+     * nilai success.
+     */
+    if (result && result.success === true) {
+
+      finished = true;
+
+      lastVote = paslon;
+
+      finish();
+
+      debug(`tersimpan: ${paslon}`);
+
+      console.log(
+        "[PEMIRA] Vote BERHASIL disimpan:",
+        paslon
+      );
+
+      return;
+    }
+
+
+    /*
+     * Backend menjawab tetapi vote gagal.
+     */
+    finished = true;
+
+    finish();
+
+    const errorMessage =
+      result?.error ||
+      "Vote gagal disimpan.";
+
+    debug(`gagal: ${errorMessage}`);
+
+    console.error(
+      "[PEMIRA] Vote GAGAL:",
+      errorMessage
+    );
+  };
+
+
+  /*
+   * =======================================================
+   * BUAT SCRIPT REQUEST
+   * =======================================================
+   *
+   * Kita menggunakan JSONP karena request ini
+   * menuju Google Apps Script Web App.
+   */
+
+  const script = document.createElement("script");
+
+
+  const url =
+    `${CONFIG.API_URL}` +
+    `?dev=${encodeURIComponent(dev)}` +
+    `&paslon=${encodeURIComponent(paslon)}` +
+    `&callback=${encodeURIComponent(callbackName)}` +
+    `&t=${Date.now()}`;
+
+
+  console.log(
+    "[PEMIRA] Vote URL:",
+    url
+  );
+
+
+  /*
+   * Kalau browser gagal memuat response,
+   * callback tidak akan terpanggil.
+   */
+  script.onerror = () => {
+
+    if (finished) {
+      return;
+    }
+
+    finished = true;
+
+    finish();
+
+    debug("gagal terhubung ke server.");
+
+    console.error(
+      "[PEMIRA] Request API gagal dimuat."
+    );
+  };
+
+
+  /*
+   * Tambahkan script ke halaman.
+   */
+  script.src = url;
+
+  document.head.appendChild(script);
+
+
+  /*
+   * =======================================================
+   * TIMEOUT
+   * =======================================================
+   *
+   * Kalau server tidak memberikan response
+   * dalam 15 detik, anggap request gagal.
+   */
+  setTimeout(() => {
+
+    if (finished) {
+      return;
+    }
+
+    finished = true;
+
+    finish();
+
+    debug("server timeout.");
+
+    console.error(
+      "[PEMIRA] API timeout."
+    );
+
+  }, 15000);
+}
 
     /*
      * =========================================================
